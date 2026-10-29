@@ -4,6 +4,39 @@
 
 
 
+### 2026-10-29 16:39 Agent:Codex - 开源终端组件调查
+
+# 用户
+
+adb终端界面有没有办法像termux那种像终端操作输入输出，键盘定制，找找开源的参考
+
+# Agent
+
+可以，**要实现你说的体验，需要把现在的 TextView＋输入框换成真正的终端模拟器**：直接在光标处输入，支持退格、补全、历史命令、颜色和屏幕刷新。
+
+找到的开源参考：
+
+| 项目 | 值得参考的部分 | 对本项目的适用性 |
+|---|---|---|
+| [Termux](https://github.com/termux/termux-app) | `terminal-emulator`、`terminal-view` | 最贴近目标体验，但需要把会话层适配到 USB ADB，不能直接套用本地进程连接 |
+| [Android Terminal Emulator](https://github.com/jackpal/Android-Terminal-Emulator) | `EmulatorView`、`TermSession` | 接入较直接：会话允许提供输入输出流，适合桥接现有 ADB；代码较老，需要验证新版 Android 兼容性 |
+| [ConnectBot](https://github.com/connectbot/connectbot) | 远程终端交互、键盘操作 | 可参考远程终端设计；它本身是 SSH 客户端，不能直接替代 USB ADB |
+
+**键盘定制可以参考 Termux 的 [ExtraKeysView](https://github.com/termux/termux-app/blob/master/termux-shared/src/main/java/com/termux/shared/termux/extrakeys/ExtraKeysView.java)**，支持扩展键、修饰键状态和长按重复等机制。可以做成两排：
+
+```text
+ESC  TAB  CTRL  ALT  HOME  ↑  END
+ /    -    |    ~     ←   ↓   →
+```
+
+针对当前项目，我建议：
+- 用终端模拟器接收 ADB 原始字节流，保留 ANSI 控制序列。
+- 按键即时发给远端 Shell，由远端处理回显，不再依赖“发送整行”。
+- 设置页增加按键布局、字号、配色及软键盘显示选项。
+- 同步处理远端 PTY 行列尺寸；这对横屏、键盘弹出和全屏程序很重要。
+
+优先评估 **Termux 组件适配**，如果改动过大，再采用 Jackpal 的流接口方案。复用前核查对应组件许可证和构建依赖。本次完成的是源码参考调查，尚未替换现有终端。
+
 ### 2026-10-29 16:31 Agent:Codex - 调整忽略规则
 
 # 用户
