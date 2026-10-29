@@ -1,4 +1,10 @@
 <resources>
     <usb-device class="255" subclass="66" protocol="1" />
     <usb-device class="14" />
+    <!-- CDC-ACM and common USB serial vendors; actual support is probed by the driver library. -->
+    <usb-device class="2" subclass="2" />
+    <usb-device vendor-id="1027" />
+    <usb-device vendor-id="1659" />
+    <usb-device vendor-id="4292" />
+    <usb-device vendor-id="6790" />
 </resources>

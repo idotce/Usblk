@@ -2,12 +2,10 @@
 
 更新时间：2026-10-29；Agent：Codex
 
-目标：处理状态栏遮挡，改善 USB ADB 交互。
+目标：USB ADB 交互终端、USB 串口助手，并构建 Release APK。
 
-状态：新增 WindowInsetsHelper，为主界面、设置、摄像头及终端窗口处理系统栏、刘海与键盘避让。ADB 改为独立 Dialog，连接时自动弹出；增加发送按钮和 Ctrl+C，保留软键盘发送。AdbShellManager 增加 writeInput 供控制字符使用。
+状态：Termux 终端接入已完成；新增独立 USB 串口助手，包含设备/端口识别、参数保存、DTR/RTS 与流控配置、UTF-8/HEX 收发、换行符、暂停/清空显示、收发与丢弃计数、时间戳、定时发送、日志导出和交互终端。固定使用 usb-serial-for-android 3.10.0，MIT 声明已保留。用户接受 GPL 开源，Agent 未提交或上传代码。
 
-参考：查看 jackpal/Android-Terminal-Emulator 的 TermSession 流接口；当前未集成其模拟器，不支持完整 ANSI 屏幕控制。
+验证：macOS 使用 build.py build_variant('release') 完整构建成功，完成 zipalign 和测试密钥签名；APK：app/build/outputs/apk/release/app-release.apk（6108041 字节）。apksigner verify 返回 0，v1/v2/v3 验证通过。日志 _temp/serial-release.log。SerialDataTest 与 ShellProtocolTest 均通过；git diff --check 通过。未安装。
 
-验证：Windows python3.exe build.py build release 成功，脚本返回 0；APK 位于 app/build/outputs/apk/release/app-release.apk。使用 debug.keystore 签名；脚本未找到 zipalign。日志 _temp/windows-release.log。未安装或真机验证。
-
-待续：用户设备上无法交互的具体原因尚未复现，需观察连接/授权/发送错误提示。完整 ANSI 终端与硬件验证尚未完成。
+待续：代码与构建任务完成，等待用户真机检查 USB 授权、设备识别、收发、流控、DTR/RTS、热拔插、输入法、横竖屏和终端刷新。无硬件验证；其他主机构建未验证。首版不含前台服务、多串口并发及 BREAK。详见 docs/serial.md、docs/terminal-port.md。

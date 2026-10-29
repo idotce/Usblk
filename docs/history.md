@@ -4,6 +4,102 @@
 
 
 
+### 2026-10-29 23:30 Agent:Codex - 三星手机无线安装 APK
+
+# 用户
+
+没有数据线怎么安装我的三星
+
+# Agent
+
+可以，不需要数据线，也不需要开 USB 调试。
+
+最方便是通过微信或 QQ 把安装包发到三星手机：
+
+1. 在 Mac 上找到 [app-release.apk](/Users/user/Project/Usblk/app/build/outputs/apk/release/app-release.apk)，通过聊天工具发送文件。若不允许发送 APK，可以压缩成 ZIP 后发送。
+2. 手机下载后，打开三星“我的文件”，找到 APK；若是 ZIP，先解压。
+3. 点击 APK，按提示允许“我的文件”安装未知应用，再安装。
+
+如果提示被“自动拦截程序 / Auto Blocker”阻止，在 **设置 → 安全和隐私** 中找到它，临时关闭后安装，完成后恢复。不同 One UI 版本名称可能略有不同。[三星官方说明](https://www.samsung.com/us/support/answer/ANS10003636/)
+
+安装后可以先查看界面；ADB、串口和摄像头功能仍需要对应 USB 设备连接。
+
+### 2026-10-29 23:29 Agent:Codex - 加入 USB 串口助手并构建 Release
+
+# 用户
+
+那就加入
+
+# 用户
+
+弄好了编译release apk
+
+# Agent
+
+已加入 USB 串口助手，支持设备识别、参数配置、文本/HEX 收发、交互终端、定时发送和日志导出。
+
+[下载 Release APK](/Users/user/Project/Usblk/app/build/outputs/apk/release/app-release.apk)
+
+Release 构建、签名校验及数据解析测试通过。使用测试密钥签名，尚未安装或真机验证。
+
+### 2026-10-29 23:22 Agent:Codex - USB 串口助手可行性评估
+
+# 用户
+
+再评估下这个app还能加入usb转串口设备识别和串口助手吗
+
+# Agent
+
+可以，接入可行。建议新增独立的 USB 串口助手入口，复用现有 USB 权限流程和 Termux 终端视图。
+
+推荐 [usb-serial-for-android](https://github.com/mik3y/usb-serial-for-android)，无需 root，支持常见 FTDI、PL2303、CP210x、CH340/CH341 和 CDC-ACM 设备。该库当前采用 [MIT 许可](https://github.com/mik3y/usb-serial-for-android/blob/master/LICENSE.txt)，接入时固定版本并保留声明。
+
+首版建议提供：
+
+- **设备识别**：名称、VID/PID、驱动、端口选择；未支持设备也显示出来。
+- **参数配置**：波特率、数据位、停止位、校验位，以及设备支持的流控。
+- **串口助手**：文本/HEX 收发、换行符选择、时间戳、收发计数、日志导出、定时发送。
+- **交互终端**：复用 Termux 视图，支持开发板 Shell、方向键和 ANSI 显示。
+
+现有代码需要调整的重点：
+
+1. 当前设备选择仅支持 ADB，插入过滤仅覆盖 ADB/UVC，需要补充串口探测。
+2. 新增独立的 SerialPortManager，串口读写放后台。串口无法照搬 ADB 的 ACK 背压，应分离接收缓存与界面刷新，暂停显示时继续接收。
+3. 文本/HEX 与终端分开显示，避免二进制控制字节被当成终端指令。普通 UART 也没有 ADB 的窗口尺寸同步协议。
+4. DTR/RTS 必须可配置，部分开发板会因此复位；具体芯片、波特率和流控能力需真机确认。
+
+后台持续连接和多端口同时工作可放第二阶段，会话管理可参考 [SimpleUsbTerminal](https://github.com/kai-morich/SimpleUsbTerminal)。
+
+本次只做评估，未修改应用功能、未进行编译或硬件验证。建议先做单端口版本，提供“文本/HEX”和“交互终端”两种模式。
+
+### 2026-10-29 23:18 Agent:Codex - 接入 Termux USB ADB 终端
+
+# 用户
+
+遵循，我会提交github
+
+# Agent
+
+已接入 Termux 终端组件，并加入 GPLv3 及第三方许可声明。
+
+- 支持直接输入、ANSI 显示、方向键、Tab、Ctrl/Alt 和复制粘贴。
+- 支持自定义扩展键、字号、配色和软键盘选项。
+- 已适配 shell_v2 的窗口尺寸同步，旧设备自动降级。
+
+编译目标检查和协议分片测试通过；尚未打包 APK 或真机验证。未执行 Git 提交或上传。
+
+### 2026-10-29 23:13 Agent:Codex - 确认终端组件接入许可
+
+# 用户
+
+你看看文档history，终端组件按你的建议加好
+
+# Agent
+
+看过 history 和移植评估，目前代码仍是 TextView＋输入框，尚未接入终端模拟器。
+
+按之前建议，优先接入 Termux 的模拟器和视图，并适配 USB ADB、即时输入、扩展按键及窗口尺寸同步。实施前有一个需要你决定的点：所选 Termux 代码包含 GPLv3-only 许可，你是否接受项目遵循相应开源许可？这会影响组件选择；之前的评估也明确没有默认替你作出这个选择。
+
 ### 2026-10-29 16:39 Agent:Codex - 开源终端组件调查
 
 # 用户

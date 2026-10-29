@@ -14,19 +14,16 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.CharBuffer;
-import java.nio.charset.CharsetDecoder;
-import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
-/** One USB ADB connection and one interactive legacy shell stream. */
+/** One USB ADB connection and one interactive shell stream. */
 public final class AdbShellManager implements AutoCloseable {
     public interface Listener {
         void onStatus(String text);
         void onConnected();
-        void onOutput(String text);
+        void onOutput(byte[] bytes);
         void onDisconnected(String reason);
     }
 
@@ -42,8 +39,12 @@ public final class AdbShellManager implements AutoCloseable {
     private volatile boolean closed;
     private volatile boolean ready;
     private int remoteId;
+    private boolean shellV2;
+    private volatile int columns = 80, rows = 24;
+    private Thread writer;
     private boolean writeReady;
     private final Object writeLock = new Object();
+    private final Object queueLock = new Object();
 
     public AdbShellManager(Context context, UsbDeviceConnection usb, UsbInterface iface, Listener listener) {
         this.context = context.getApplicationContext();
@@ -58,11 +59,29 @@ public final class AdbShellManager implements AutoCloseable {
         return writeInput(command + "\n");
     }
 
-    public boolean writeInput(String text) {
-        if (!ready || closed) return false;
-        byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
-        if (bytes.length > LIMIT) return false;
-        return pending.offer(bytes);
+    public boolean writeInput(String text) { return writeBytes(text.getBytes(StandardCharsets.UTF_8)); }
+
+    public boolean writeBytes(byte[] bytes) {
+        synchronized (queueLock) {
+            if (!ready || closed || bytes.length > 256 * 1024) return false;
+            int chunk = shellV2 ? LIMIT - 5 : LIMIT;
+            int count = (bytes.length + chunk - 1) / chunk;
+            if (pending.remainingCapacity() < count) return false;
+            for (int offset = 0; offset < bytes.length; offset += chunk) {
+                byte[] data = java.util.Arrays.copyOfRange(bytes, offset, Math.min(bytes.length, offset + chunk));
+                pending.add(shellV2 ? ShellProtocol.frame(0, data) : data);
+            }
+            return true;
+        }
+    }
+
+    public void resize(int columns, int rows) {
+        this.columns = columns;
+        this.rows = rows;
+    }
+
+    private byte[] windowSize() {
+        return ShellProtocol.frame(5, (rows + "x" + columns + ",0x0\0").getBytes(StandardCharsets.US_ASCII));
     }
 
     private void run() {
@@ -75,12 +94,19 @@ public final class AdbShellManager implements AutoCloseable {
             }
             if (in == null || out == null || !usb.claimInterface(iface, true)) throw new IOException("无法占用 ADB USB 接口");
             AdbCrypto crypto = loadKey();
-            send(CNXN, 0x01000000, LIMIT, "host::\0".getBytes(StandardCharsets.UTF_8));
+            send(CNXN, 0x01000000, LIMIT, "host::features=shell_v2;\0".getBytes(StandardCharsets.UTF_8));
             boolean signed = false;
             while (!closed) {
                 Packet packet = readPacket();
                 if (packet.command == CNXN) {
                     if (packet.arg0 < 0x01000000 || packet.arg1 < LIMIT) throw new IOException("目标 ADB 协议版本或缓冲区不受支持");
+                    String banner = new String(packet.data, StandardCharsets.UTF_8);
+                    int properties = banner.indexOf("::");
+                    if (properties >= 0) banner = banner.substring(properties + 2);
+                    for (String field : banner.split("[;\\x00]")) {
+                        if (field.startsWith("features="))
+                            shellV2 = java.util.Arrays.asList(field.substring(9).split(",")).contains("shell_v2");
+                    }
                     break;
                 }
                 if (packet.command != AUTH || packet.arg0 != 1 || packet.data.length != 20) throw new IOException("ADB 握手响应无效");
@@ -93,28 +119,26 @@ public final class AdbShellManager implements AutoCloseable {
                 }
             }
             if (closed) return;
-            send(OPEN, 1, 0, "shell:\0".getBytes(StandardCharsets.UTF_8));
+            send(OPEN, 1, 0, (shellV2 ? "shell,v2,pty,TERM=xterm-256color:\0" : "shell:\0").getBytes(StandardCharsets.UTF_8));
+            if (!shellV2) listener.onStatus("目标使用旧版 Shell，无法同步远端窗口尺寸");
             Packet first = readPacket();
             if (first.command != OKAY || first.arg1 != 1 || first.arg0 == 0) throw new IOException("目标设备拒绝打开 Shell");
             remoteId = first.arg0;
             synchronized (writeLock) { writeReady = true; }
             ready = true;
             listener.onConnected();
-            new Thread(this::writeLoop, "adb-usb-writer").start();
-            CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPLACE).onUnmappableCharacter(CodingErrorAction.REPLACE);
-            ByteBuffer bytes = ByteBuffer.allocate(LIMIT + 4);
-            CharBuffer chars = CharBuffer.allocate(LIMIT + 4);
+            writer = new Thread(this::writeLoop, "adb-usb-writer");
+            writer.start();
+            ShellProtocol protocol = new ShellProtocol(new ShellProtocol.Listener() {
+                @Override public void onData(byte[] bytes) { listener.onOutput(bytes); }
+                @Override public void onExit(int status) { listener.onStatus("远端 Shell 退出码：" + status); }
+            });
             while (!closed) {
                 Packet packet = readPacket();
                 if (packet.arg0 != remoteId || packet.arg1 != 1) throw new IOException("ADB 流编号无效");
                 if (packet.command == WRTE) {
-                    bytes.put(packet.data);
-                    bytes.flip();
-                    decoder.decode(bytes, chars, false);
-                    bytes.compact();
-                    chars.flip();
-                    if (chars.hasRemaining()) listener.onOutput(chars.toString());
-                    chars.clear();
+                    if (shellV2) protocol.accept(packet.data);
+                    else listener.onOutput(packet.data);
                     send(OKAY, 1, remoteId, new byte[0]);
                 } else if (packet.command == OKAY) {
                     synchronized (writeLock) { writeReady = true; writeLock.notifyAll(); }
@@ -149,8 +173,13 @@ public final class AdbShellManager implements AutoCloseable {
 
     private void writeLoop() {
         try {
+            int sentColumns = -1, sentRows = -1;
             while (!closed) {
-                byte[] data = pending.take();
+                int nextColumns = columns, nextRows = rows;
+                boolean sizeChanged = shellV2 && (sentColumns != nextColumns || sentRows != nextRows);
+                byte[] data = sizeChanged ? windowSize() : pending.poll(100, java.util.concurrent.TimeUnit.MILLISECONDS);
+                if (data == null) continue;
+                if (sizeChanged) { sentColumns = nextColumns; sentRows = nextRows; }
                 synchronized (writeLock) {
                     while (!closed && !writeReady) writeLock.wait();
                     if (closed) return;
@@ -222,7 +251,8 @@ public final class AdbShellManager implements AutoCloseable {
         closed = true;
         ready = false;
         synchronized (writeLock) { writeLock.notifyAll(); }
-        pending.offer(new byte[0]);
+        if (writer != null) writer.interrupt();
+        pending.clear();
         usb.close();
     }
 }

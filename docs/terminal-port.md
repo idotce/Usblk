@@ -1,32 +1,34 @@
-# Termux 终端移植评估
+# Termux 终端接入
 
 更新时间：2026-10-29；Agent：Codex
 
-结论：技术上可行，但不是直接添加依赖即可使用。评估源码固定为 termux/termux-app 提交 8629e632fcb95da272221be327db653fb24befe9，临时检出位于 _temp/termux-eval。
+已接入固定版本 termux/termux-app 8629e632fcb95da272221be327db653fb24befe9 的 terminal-emulator、terminal-view Java 及资源，位于 terminal 模块。项目按 GPL-3.0-only 发布，保留上游 Apache-2.0 例外；逐文件来源、哈希和许可见 terminal/NOTICE.md。完整许可同时打包到应用 assets/licenses。
 
-## 已核实的接口
+## 架构
 
-- terminal-emulator 的 TerminalEmulator.append(byte[], int) 接收原始输出；TerminalOutput.write(byte[], int, int) 回传键盘输入及终端查询响应；resize 更新本地显示尺寸。
-- terminal-view 的 TerminalView 直接依赖 TerminalSession，涉及 attachSession、write、writeCodePoint、updateSize、getEmulator 等调用。
-- TerminalSession 是 final 类，initializeEmulator 会通过 JNI.createSubprocess 创建本地 PTY/进程，不能通过继承改为 USB ADB 会话。
-- 当前项目在 AdbShellManager 中先解码 UTF-8 再回调字符串；需要增加原始字节回调和原始输入接口，避免终端模拟器之前的信息损失。
-- 当前 shell: 是旧协议会话，没有窗口尺寸控制通道。需要协商 shell_v2 并打开 PTY 会话，解析其独立于 ADB WRTE 的数据帧；尺寸变化发送 window-size 控制帧。旧设备应降级并说明尺寸同步限制。
+- TerminalSession 改为传输无关接口；AdbTerminalSession 连接模拟器与 USB ADB，不启动本地进程，不依赖 Termux JNI 或包管理系统。
+- 输出保持原始字节，UTF-8、ANSI、光标、颜色、屏幕更新由模拟器处理；输入经有界队列由 USB 写线程发送，回显和命令历史由远端 Shell 处理。
+- 模拟器及视图只在主线程更新。读线程等待主线程消费后才 ACK，避免大量终端输出无限积压 UI 消息；切换连接时通过 generation 丢弃旧会话回调。
+- 协商 shell_v2 时打开 shell,v2,pty,TERM=xterm-256color:，增量解析 stdout/stderr/exit 帧；窗口变化通过 ID 5 控制帧同步远端 PTY。写线程合并连续尺寸变化。协议依据 AOSP shell_protocol.h、daemon/shell_service.cpp。
+- 不支持 shell_v2 时降级 shell:，明确提示不能同步远端尺寸。
+- 横竖屏切换保留 Activity 和连接，终端视图重新布局时同步尺寸；Activity 真正销毁则关闭 USB 和写线程。
 
-## 建议实施范围
+## 操作与设置
 
-1. 固定上游版本，核查逐文件许可证，保留来源、版权和改动说明。
-2. 提取终端模拟器和视图，抽象视图所需的会话接口，增加 AdbTerminalSession；去除对本地进程启动的运行时依赖，不引入 Termux 包管理系统。
-3. 实现原始字节双向传输、背压、断连与线程生命周期；解析器和绘制在主线程更新，USB 读写在工作线程。
-4. 完成 shell_v2 PTY 和窗口尺寸同步，再处理横竖屏、键盘弹出、退格、补全、方向键、Ctrl/Alt、剪贴板与 ANSI 屏幕刷新。
-5. 自行实现可配置扩展按键栏，参考 Termux 的交互方式；不直接整包引入 termux-shared。
-6. 设置保存字号、配色、按键布局及键盘选项。命令历史由远端 Shell 处理，不在 UI 伪造。
+直接点击终端输入；支持软键盘、硬件键盘、退格、Tab、方向键、Ctrl/Alt 与长按选区复制粘贴。扩展键的 CTRL/ALT 是单次修饰键，例如点 CTRL 后输入 c。
 
-## 依赖与许可证边界
+设置页可保存字号（8–32）、白色/绿色文字、自动显示软键盘、扩展键布局；返回终端生效。布局用空格分隔键、分号换行，最多三排，每排八键。特殊键支持 ESC TAB CTRL ALT HOME END UP DOWN LEFT RIGHT ENTER KEYBOARD，其余标签作为文字输入。未实现扩展键长按重复。
 
-上游根 LICENSE.md 声明 GPLv3-only，同时列出终端库所含 Apache-2.0 来源代码的例外；不能把整个 terminal-view 或 terminal-emulator 一概认定为 Apache-2.0。termux-shared/LICENSE.md 对 shared/termux 路径默认采用 GPLv3-only，ExtraKeysView 位于该路径。实际移植前必须逐文件记录许可证，不默认项目已经选择 GPL 发布。
+## 验证与限制
 
-上游当前模块构建采用 Java 8、minSdk 21、compileSdk 36，模拟器模块含 JNI 构建和上游发布配置。本项目 minSdk 23、compileSdk 35；需要单独验证选定源码及 Android API 要求，不能仅修改 Gradle 数字宣称兼容。
+macOS 使用项目 build.py 的 run_gradle 入口执行 :app:compileDebugJavaWithJavac，包含 terminal Java、应用 Kotlin/Java 与资源处理；通过，无完整 APK 打包。保留 JDK 21 对 Java 8 目标和已有 Android API 的弃用警告。
 
-## 验证状态
+独立 ShellProtocolTest 覆盖所有分片尺寸、合并帧、空帧、中文/ANSI 字节保持、退出码和非法报文头，通过。复现命令：
 
-本次为源码评估，未修改应用代码、未构建移植版本、未验证硬件。Windows Python 构建方式沿用现有授权，实施后使用 build.py 验证。
+```sh
+mkdir -p _temp/test-classes
+javac -d _temp/test-classes app/src/main/java/com/example/usbhosttool/ShellProtocol.java tests/java/com/example/usbhosttool/ShellProtocolTest.java
+java -cp _temp/test-classes com.example.usbhosttool.ShellProtocolTest
+```
+
+尚无真机验证。需检查 USB 授权及重连、中文输入/粘贴、Tab/历史、Ctrl+C、横竖屏与软键盘变化后的 stty size，以及设备支持时的 top/vi 全屏刷新。旧协议设备尺寸限制保留。未验证其他构建主机与所有 Android 版本的输入法/绘制兼容性。
