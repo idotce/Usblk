@@ -4,6 +4,22 @@
 
 
 
+### 2026-10-30 10:17 Agent:Codex - 修复终端输入焦点
+
+# 用户
+
+昨天改完termux终端，不会弹出输入法，没法输入
+
+# Agent
+
+已修复：移植时漏了终端视图的触摸焦点设置，导致输入法无法正常弹出。ADB 和串口终端已一起补齐，ADB 弹窗也清除了阻止输入法的窗口标志。
+
+Windows Release 构建通过，脚本返回 **0**。
+
+新版 APK：[app-release.apk](/mnt/d/project/aicode/usblk/app/build/outputs/apk/release/app-release.apk)
+
+安装后打开终端或点击终端区域测试。尚未真机验证；本次 APK 使用 Windows 测试密钥签名，如果提示签名不一致，不要直接卸载，以免丢失应用数据。
+
 ### 2026-10-29 23:30 Agent:Codex - 三星手机无线安装 APK
 
 # 用户

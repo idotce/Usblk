@@ -88,6 +88,8 @@ public class MainActivity extends Activity {
         terminalContent.setOrientation(LinearLayout.VERTICAL);
         terminalContent.setBackgroundColor(Color.BLACK);
         terminalView = new com.termux.view.TerminalView(this, null);
+        terminalView.setFocusable(true);
+        terminalView.setFocusableInTouchMode(true);
         TerminalCallbacks callbacks = new TerminalCallbacks() {
             @Override public void onTextChanged(com.termux.terminal.TerminalSession session) { terminalView.onScreenUpdated(); }
             @Override public void onColorsChanged(com.termux.terminal.TerminalSession session) { terminalView.invalidate(); }
@@ -222,6 +224,8 @@ public class MainActivity extends Activity {
             terminal.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         }
         terminal.show();
+        terminal.getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                | android.view.WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);
         terminal.getWindow().setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT);
         WindowInsetsHelper.apply(terminalContent);
         terminalView.requestFocus();

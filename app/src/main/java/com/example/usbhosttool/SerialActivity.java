@@ -102,6 +102,8 @@ public final class SerialActivity extends Activity {
         outputScroll = new ScrollView(this); outputScroll.addView(output);
         root.addView(outputScroll, new LinearLayout.LayoutParams(-1, 0, 1));
         terminal = new TerminalView(this, null);
+        terminal.setFocusable(true);
+        terminal.setFocusableInTouchMode(true);
         TerminalCallbacks callbacks = new TerminalCallbacks() {
             @Override public void onTextChanged(TerminalSession s) { terminal.onScreenUpdated(); }
             @Override public void onColorsChanged(TerminalSession s) { terminal.invalidate(); }
